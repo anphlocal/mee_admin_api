@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+aioredis
+redis
+mysql-connector-python
+sqlalchemy
+# Thêm các package khác tại đây
+python-dotenv
+passlib[bcrypt]
+python-jose
+pydantic[email]
+pydantic-settings
+alembic
+bcrypt
+pytz
