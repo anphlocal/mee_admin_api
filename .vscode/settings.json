@@ -6,7 +6,7 @@
         "**/.DS_Store": true,
         "**/Thumbs.db": true,
         "**/__pycache__":true,
-        // "**/alembic*":true,
+        "**/alembic*":true,
         "**/venv":true,
         "**/.env":true,
         "**/.github":true

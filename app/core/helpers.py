@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.core.config import settings
 from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
+from typing import Any, Optional
+from app.enums.status_code import ResponseCode
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -25,3 +28,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     if user is None:
         raise credentials_exception
     return user
+
+class APIResponse(BaseModel):
+    code: int = ResponseCode.SUCCESS
+    message: str = "Success"
+    data: Optional[Any] = None
+    

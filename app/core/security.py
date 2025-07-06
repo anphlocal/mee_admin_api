@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from app.core.config import settings
 
-SECRET_KEY = "your-secret-key"  # Nên lấy từ biến môi trường thực tế
+SECRET_KEY = settings.SECRET_KEY  # Nên lấy từ biến môi trường thực tế
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

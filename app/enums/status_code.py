@@ -1,0 +1,14 @@
+from enum import Enum
+
+class ResponseCode(int, Enum):
+    SUCCESS = 200
+    BAD_REQUEST = 400
+    UNAUTHORIZED = 401
+    FORBIDDEN = 403
+    NOT_FOUND = 404
+    INTERNAL_ERROR = 500
+
+    VALIDATION_ERROR = 1001
+    USER_NOT_FOUND = 1002
+    TOKEN_EXPIRED = 1003
+    PERMISSION_DENIED = 1004

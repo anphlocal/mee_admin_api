@@ -6,31 +6,35 @@ from app.core.security import get_password_hash, verify_password, create_access_
 from app.db.database import SessionLocal
 from app.core.config import settings
 from datetime import timedelta
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from fastapi import Request
 from app.core.helpers import get_current_user
+from app.core.helpers import APIResponse
+from app.enums.status_code import ResponseCode
 from app.core.db_session import DBSession
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+http_bearer = HTTPBearer()
 
 @router.post("/register", response_model=UserRead)
 async def register(user: UserCreate, db: Session = Depends(DBSession.dependency)):
     db_user = db.query(User).filter((User.username == user.username) | (User.email == user.email)).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="Username or email already registered")
+        raise HTTPException(status_code=401, detail="Tài khoản đã tồn tại trên hệ thống") 
     hashed_password = get_password_hash(user.password)
     new_user = User(username=user.username, email=user.email, hashed_password=hashed_password)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    return APIResponse(data=new_user)
 
 @router.post("/login")
 async def login(user: UserCreate, db: Session = Depends(DBSession.dependency)):
     db_user = db.query(User).filter(User.username == user.username).first()
+    if db_user.deleted_at is not None:
+        raise HTTPException(status_code=401, detail="Tài khoản đã bị khóa") 
     if not db_user or not verify_password(user.password, db_user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     access_token = create_access_token(
@@ -59,5 +63,17 @@ async def refresh_token(request: Request, db: Session = Depends(DBSession.depend
     return {"access_token": new_token, "token_type": "bearer"}
 
 @router.get("/me", response_model=UserRead)
-async def me(current_user: User = Depends(get_current_user)):
-    return current_user
+async def me(credentials: HTTPAuthorizationCredentials = Depends(http_bearer), db: Session = Depends(DBSession.dependency)):
+    token = credentials.credentials
+    print("DEBUG TOKEN:", token)
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
