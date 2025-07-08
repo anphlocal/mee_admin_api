@@ -13,67 +13,137 @@ from app.core.helpers import get_current_user
 from app.core.helpers import APIResponse
 from app.enums.status_code import ResponseCode
 from app.core.db_session import DBSession
+from app.core.helpers import APIException
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 http_bearer = HTTPBearer()
 
-@router.post("/register", response_model=UserRead)
+# Đăng ký tài khoản
+@router.post("/register", response_model=APIResponse)
 async def register(user: UserCreate, db: Session = Depends(DBSession.dependency)):
-    db_user = db.query(User).filter((User.username == user.username) | (User.email == user.email)).first()
-    if db_user:
-        raise HTTPException(status_code=401, detail="Tài khoản đã tồn tại trên hệ thống") 
-    hashed_password = get_password_hash(user.password)
-    new_user = User(username=user.username, email=user.email, hashed_password=hashed_password)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return APIResponse(data=new_user)
+    try:
+        db_user = db.query(User).filter((User.username == user.username) | (User.email == user.email)).first()
+        if db_user:
+            raise APIException(
+                code=ResponseCode.UNAUTHORIZED,
+                message="Tài khoản đã tồn tại trên hệ thống"
+            )
+        hashed_password = get_password_hash(user.password)
+        new_user = User(username=user.username, email=user.email, hashed_password=hashed_password)
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return APIResponse(data=UserRead.model_validate(new_user))
+    except APIException:
+        raise
+    except Exception:
+        raise APIException(
+            code=ResponseCode.INTERNAL_ERROR,
+            message="Lỗi hệ thống",
+            data=None
+        )
 
+# Đăng nhập
 @router.post("/login")
 async def login(user: UserCreate, db: Session = Depends(DBSession.dependency)):
-    db_user = db.query(User).filter(User.username == user.username).first()
-    if db_user.deleted_at is not None:
-        raise HTTPException(status_code=401, detail="Tài khoản đã bị khóa") 
-    if not db_user or not verify_password(user.password, db_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
-    access_token = create_access_token(
-        data={"sub": db_user.username},
-        expires_delta=timedelta(minutes=30)
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    try:
+        db_user = db.query(User).filter(User.username == user.username).first()
+        if not db_user or db_user.deleted_at is not None:
+            raise APIException(
+                code=ResponseCode.UNAUTHORIZED,
+                message="Tài khoản đã bị khóa hoặc không tồn tại"
+            )
+        if not verify_password(user.password, db_user.hashed_password):
+            raise APIException(
+                code=ResponseCode.UNAUTHORIZED,
+                message="Tài khoản hoặc mật khẩu không chính xác"
+            )
+        access_token = create_access_token(
+            data={"sub": db_user.username},
+            expires_delta=timedelta(minutes=30)
+        )
+        return APIResponse(data={"access_token": access_token, "token_type": "bearer"})
+    except APIException:
+        raise
+    except Exception:
+        raise APIException(
+            code=ResponseCode.INTERNAL_ERROR,
+            message="Lỗi hệ thống",
+            data=None
+        )
 
+# Làm mới token
 @router.post("/refresh-token")
 async def refresh_token(request: Request, db: Session = Depends(DBSession.dependency)):
-    token = request.headers.get("authorization")
-    if not token or not token.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing token")
-    token = token.split(" ", 1)[1]
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
-        username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    new_token = create_access_token(data={"sub": user.username})
-    return {"access_token": new_token, "token_type": "bearer"}
+        token = request.headers.get("authorization")
+        if not token or not token.startswith("Bearer "):
+            raise APIException(
+                code=ResponseCode.UNAUTHORIZED,
+                message="Token không hợp lệ"
+            )
+        token = token.split(" ", 1)[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
+            username = payload.get("sub")
+            if username is None:
+                raise APIException(
+                    code=ResponseCode.UNAUTHORIZED,
+                    message="Token không hợp lệ"
+                )
+        except JWTError:
+            raise APIException(
+                code=ResponseCode.UNAUTHORIZED,
+                message="Token không hợp lệ"
+            )
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise APIException(
+                code=ResponseCode.UNAUTHORIZED,
+                message="Tài khoản không tồn tại"
+            )
+        new_token = create_access_token(data={"sub": user.username})
+        return APIResponse(data={"access_token": new_token, "token_type": "bearer"})
+    except APIException:
+        raise
+    except Exception:
+        raise APIException(
+            code=ResponseCode.INTERNAL_ERROR,
+            message="Lỗi hệ thống",
+            data=None
+        )
 
+# Lấy thông tin tài khoản
 @router.get("/me", response_model=UserRead)
 async def me(credentials: HTTPAuthorizationCredentials = Depends(http_bearer), db: Session = Depends(DBSession.dependency)):
-    token = credentials.credentials
-    print("DEBUG TOKEN:", token)
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
+        token = credentials.credentials
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+            username = payload.get("sub")
+            if username is None:
+                raise APIException(
+                    code=ResponseCode.UNAUTHORIZED,
+                    message="Token không hợp lệ"
+                )
+        except JWTError:
+            raise APIException(
+                code=ResponseCode.UNAUTHORIZED,
+                message="Token không hợp lệ"
+            )
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise APIException(
+                code=ResponseCode.UNAUTHORIZED,
+                message="Tài khoản không tồn tại"
+            )
+        return APIResponse(data=UserRead.model_validate(user))
+    except APIException:
+        raise
+    except Exception:
+        raise APIException(
+            code=ResponseCode.INTERNAL_ERROR,
+            message="Lỗi hệ thống",
+            data=None
+        )
